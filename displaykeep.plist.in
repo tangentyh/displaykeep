@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.tangentyh.displaykeep</string>
+	<string>@LABEL@</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>@BIN@</string>
@@ -12,12 +12,19 @@
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
+	<!-- restart on crash, but not after a clean "Quit" from the menu bar -->
 	<key>KeepAlive</key>
-	<true/>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
 	<key>ThrottleInterval</key>
 	<integer>10</integer>
+	<!-- Interactive: this process owns a status item, Background would invite App Nap -->
 	<key>ProcessType</key>
-	<string>Background</string>
+	<string>Interactive</string>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
 	<key>StandardOutPath</key>
 	<string>/tmp/displaykeep.log</string>
 	<key>StandardErrorPath</key>
