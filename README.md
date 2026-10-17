@@ -1,35 +1,65 @@
 # displaykeep
 
-macOS keeps two idle timers apart: **system sleep** (`PreventUserIdleSystemSleep`) and
-**display sleep** (`PreventUserIdleDisplaySleep`). Audio players only take the first one,
-so music keeps the machine awake while the panel still blanks at `displaysleep`.
+![the status item, left to right: holding, armed, paused](docs/menubar.png)
 
-There is no way to ask macOS to "promote" an existing system-sleep assertion into a display
-one — assertions are typed and owned per process, and there is no notification API for
-assertion changes. So you hold the display assertion yourself, driven by polling.
+**Keeps the display awake only while some other process is already keeping the Mac awake.**
 
-One process does it all: the poll loop, a **menu bar icon** showing whether it is currently
-in effect, and a **pause toggle**.
+macOS runs two idle timers apart: **system sleep** (`PreventUserIdleSystemSleep`) and
+**display sleep** (`PreventUserIdleDisplaySleep`). Audio players only take the first one, so
+music keeps the machine awake while the panel still blanks at `displaysleep`.
 
-## tl;dr without building anything
+Usually that is exactly right. It stops being right when the speakers are the monitor: the
+screen blanks, the audio dies, and the machine is wide awake doing nothing about it. There is
+no way to ask macOS to "promote" an existing system-sleep assertion into a display one —
+assertions are typed and owned per process, and there is no notification API for assertion
+changes. So this holds the display assertion itself, driven by polling, and gives it back the
+moment the other assertion goes away.
+
+That is the whole tool. One process: poll loop, a menu bar icon showing whether it is
+currently in effect, and a pause toggle.
+
+## Why not just…
+
+| Approach | Keys off | Doesn't fit when |
+| --- | --- | --- |
+| `caffeinate -d -w $(pgrep -x Music)` | the app's **lifetime** | you pause playback — the display stays on anyway; and the app has to be named up front |
+| Amphetamine / Keepresso / Jiggler "audio playing" trigger | Now Playing or output-device state | the player has to cooperate with those APIs; behaviour varies by app and OS release |
+| `sudo pmset -a displaysleep 0` | nothing | the display then never sleeps again |
+| **displaykeep** | the `PreventUserIdleSystemSleep` assertion **itself** | nothing to get wrong — it mirrors what the system already believes |
+
+Because it mirrors assertion state rather than guessing at playback, there is no per-app
+configuration: any producer counts — a browser tab, AirPlay, `ffmpeg`, a game, a DJ app — and
+it releases the display as soon as the last one stops.
+
+## Install
+
+### From a release (no Xcode needed)
 
 ```sh
-caffeinate -d -w $(pgrep -x NeteaseMusic)     # display stays on while the app runs
-caffeinate -d                                 # just keep the display on, until ^C
-sudo pmset -a displaysleep 0                  # no software at all: never sleep the display
+unzip -o displaykeep-1.2.zip -d ~/Applications
+xattr -dr com.apple.quarantine ~/Applications/DisplayKeep.app    # see below
+open ~/Applications/DisplayKeep.app
 ```
 
-`caffeinate -d -w` is tied to process lifetime, not playback, so it also keeps the screen on
-while the app is paused. The tool below keys off the actual assertion.
+Then add `DisplayKeep.app` to System Settings → General → **Login Items** if you want it to
+start at login. It is an `LSUIElement` app: menu bar only, no Dock icon, no windows.
 
-## Build / run
+> The release zip is **ad-hoc signed** (`codesign -s -`), not notarized — there is no
+> Developer ID behind it. macOS will refuse the first launch with "cannot be opened because
+> the developer cannot be verified". Right-click → **Open**, or run the `xattr` line above.
+> Building from source avoids the prompt entirely.
+
+### From source (gets the launchd agent)
 
 ```sh
 make build                       # -> .build/DisplayKeep.app (ad-hoc signed, LSUIElement)
 make run                         # foreground, verbose, menu bar icon appears
 make install                     # ~/Applications/DisplayKeep.app + launchd agent
 make uninstall
+make package                     # -> .build/displaykeep-<version>.zip for a release
 ```
+
+Needs macOS 13+ and the Xcode Command Line Tools (`swiftc`). No SPM, no dependencies.
 
 Build output lives in `.build/`, hidden on purpose: Spotlight/LaunchServices do not index
 hidden directories, so a dev build never turns up as a second "displaykeep" in Spotlight or
@@ -43,8 +73,12 @@ GitHub handle; override with `make install LABEL=…`):
 ~/Applications/DisplayKeep.app                    the app (single binary inside)
 ~/.local/bin/displaykeep -> .../MacOS/displaykeep CLI, same executable
 ~/Library/LaunchAgents/com.tangentyh.displaykeep.plist
-.build/                                           build output, gitignored, not installed
+~/Library/Logs/displaykeep.log                    launchd stdout/stderr
 ```
+
+`make install` takes `INTERVAL=5` for the poll rate. The launchd path is worth preferring
+over Login Items: it restarts on crash, stays quit when you choose Quit, and has one place to
+look when something is off (`make status`).
 
 Options (daemon):
 
@@ -60,12 +94,14 @@ For a filter under launchd, edit `ProgramArguments` in the generated plist (add 
 
 ## The menu bar icon
 
+Left to right in the image above: **holding**, **armed**, **paused**.
+
 | Glyph | State | Meaning |
 | --- | --- | --- |
-| filled cup | **holding** | we hold `PreventUserIdleDisplaySleep`; the display will not sleep |
-| outline cup (dim) | **armed** | watching, but nothing holds the system awake — the display may sleep |
-| pause circle | **paused** | you turned it off; the assertion is released |
-| warning triangle | **failed** | `IOPMAssertionCreateWithName` returned an error — the menu says which |
+| filled cup, normal tint | **holding** | we hold `PreventUserIdleDisplaySleep`; the display will not sleep |
+| outline cup, dimmed | **armed** | watching, but nothing holds the system awake — the display may sleep |
+| pause circle, dimmed | **paused** | you turned it off; the assertion is released |
+| orange warning triangle | **failed** | `IOPMAssertionCreateWithName` returned an error — the menu says which |
 
 `holding` is not self-reported: after acquiring, the daemon re-reads
 `IOPMCopyAssertionsByProcess()` and checks that *its own* assertion is really there
@@ -75,6 +111,10 @@ and re-acquires. Hover the icon for the same line plus the trigger that caused i
 Click the icon for the menu: current state, the live trigger list (`app(pid) — assertion`),
 **Pause / Resume**, **Pause for…** (15 m / 30 m / 1 h / 4 h), the poll settings, the log, and
 Quit. `⌘P` toggles, `⌘Q` quits.
+
+The glyph is a template image, so it follows the menu bar appearance; the two idle states are
+dimmed with `appearsDisabled` rather than a hardcoded colour, which is what keeps the icon
+legible over both a light and a dark menu bar.
 
 ## Toggling without the mouse
 
@@ -127,7 +167,9 @@ All under `~/Library/Application Support/displaykeep/`:
 | `paused` | present = paused; contents = epoch deadline or `forever` |
 | `lock` | `flock`, so a second instance exits instead of adding a second menu bar icon |
 
-Logs go to `/tmp/displaykeep.log` under launchd (menu → Open log).
+The log is `~/Library/Logs/displaykeep.log` (menu → Open log, or `make log`). Under /tmp it
+was world-readable and got cleaned out from under launchd; now it is per-user, and it is
+truncated at startup once it passes ~1 MiB so a long-lived daemon stays bounded.
 
 ## How it works
 
@@ -144,6 +186,8 @@ Filters that matter (all discovered the hard way):
 - `runningboardd` relays xpc/extension/service assertions (`com.apple.CFNetwork.StorageDB`,
   dataaccess, Time Machine intents, ...) that hold `PreventUserIdleSystemSleep` almost
   constantly; in default mode those are filtered, otherwise the display never sleeps.
+- `usernoted` holds a system-sleep assertion while a notification banner is pending —
+  counting it flashes the display on for every notification.
 - `proc_name(3)` fails for other users' processes (powerd, coreaudiod → empty name); this
   uses `sysctl(KERN_PROC_PID)` instead.
 - `caffeinate` itself is excluded so the two tools can coexist.
@@ -177,3 +221,14 @@ SIGINT/SIGTERM/SIGHUP, and the menu bar icon present as an `LSUIElement` app und
   second "displaykeep" in Spotlight / Open With).
 - `selfSustaining` matches on process name, and `p_comm` truncates at 16 chars — that matters
   for both the self-exclusion and `-m` patterns.
+
+## Status
+
+A personal tool that turned out to be worth keeping installed, published in case the IOKit
+notes above save someone else the afternoon. It reads power-management internals that Apple
+changes without notice: treat "works on my macOS" as the honest warranty. Issues and
+corrections welcome; the filters are the part most likely to need updating on a new release.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Changes in [CHANGELOG.md](CHANGELOG.md).

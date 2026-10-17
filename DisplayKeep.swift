@@ -30,12 +30,13 @@
 //   state.json  written every tick; the CLI and any widget read it
 //   paused      present = paused; contents = epoch deadline, or "forever"
 //   lock        flock, so a second instance does not add a second menu bar icon
+// plus ~/Library/Logs/displaykeep.log, which launchd writes our stdout into.
 
 import Foundation
 import IOKit.pwr_mgt
 import AppKit
 
-let displaykeepVersion = "1.1"
+let displaykeepVersion = "1.2"
 
 // MARK: - paths
 
@@ -45,12 +46,31 @@ let supportDir = FileManager.default
 let stateURL = supportDir.appendingPathComponent("state.json")
 let pauseURL = supportDir.appendingPathComponent("paused")
 let lockURL = supportDir.appendingPathComponent("lock")
-let logPath = "/tmp/displaykeep.log"
+
+// Logs belong in ~/Library/Logs, not /tmp: per-user, not world-readable, and not
+// reaped by the periodic /tmp clean-out while launchd still holds the fd.
+let logDir = FileManager.default
+    .urls(for: .libraryDirectory, in: .userDomainMask)[0]
+    .appendingPathComponent("Logs", isDirectory: true)
+let logPath = logDir.appendingPathComponent("displaykeep.log").path
 
 func ensureSupportDir() {
     try? FileManager.default.createDirectory(
         at: supportDir, withIntermediateDirectories: true,
         attributes: [.posixPermissions: 0o700])
+}
+
+/// Called once at startup. Under launchd, StandardOutPath is opened by launchd before
+/// we run, so we cannot create the file — only the directory (the Makefile does it at
+/// install time). Truncate, never unlink: launchd keeps writing to the same fd, so an
+/// unlink would silently send the rest of the log to a deleted inode.
+func prepareLog() {
+    try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
+    guard let attrs = try? FileManager.default.attributesOfItem(atPath: logPath),
+          let size = attrs[.size] as? NSNumber, size.intValue > 1 << 20,
+          let fh = FileHandle(forWritingAtPath: logPath) else { return }
+    try? fh.truncate(atOffset: 0)
+    try? fh.close()
 }
 
 // MARK: - state file
@@ -179,7 +199,9 @@ func procName(_ pid: pid_t) -> String {
 /// Processes whose system-sleep assertions must never keep the display on.
 let selfSustaining: Set<String> = ["powerd", "displaykeep", "caffeinate"]
 /// Noise relays for assertions this tool has no business acting on.
-let relays: Set<String> = ["runningboardd", "launchd", "logd", "syslogd"]
+/// usernoted: a pending notification banner holds a system-sleep assertion; counting it
+/// would flash the display on for every notification.
+let relays: Set<String> = ["runningboardd", "launchd", "logd", "syslogd", "usernoted"]
 
 struct Options {
     var interval: Double = 3
@@ -402,6 +424,7 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         installSignalHandlers()
+        prepareLog()
 
         if !opts.headless {
             statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -634,11 +657,12 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastVisual = key
 
         button.image = iconImage(v)
-        switch v {
-        case .holding: button.contentTintColor = nil
-        case .armed, .paused: button.contentTintColor = .secondaryLabelColor
-        case .failed: button.contentTintColor = .systemOrange
-        }
+        // Leave the template tint alone so the glyph follows the menu bar appearance; an
+        // explicit .secondaryLabelColor reads as near-black on a dark/translucent bar.
+        // "Not currently doing anything" is expressed by the disabled look, which is how
+        // macOS dims status items in either appearance.
+        button.contentTintColor = (v == .failed) ? .systemOrange : nil
+        button.appearsDisabled = (v == .armed || v == .paused)
         var tip = "displaykeep — " + line
         if let reason = triggers.first {
             tip += "\n" + reason.proc + ": " + reason.assertion
@@ -757,6 +781,7 @@ func usage() -> Never {
       -h          this help
 
     files: \(supportDir.path)
+    log:   \(logPath)   (launchd stdout; ~1 MiB, truncated at startup)
     """)
     exit(0)
 }

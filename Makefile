@@ -5,10 +5,12 @@ LABEL   ?= com.tangentyh.displaykeep
 # set on the command line to retire an older agent label in one shot:
 #   make install LEGACY=com.old.handle.displaykeep
 LEGACY  ?=
-VERSION ?= 1.1
+VERSION ?= 1.2
+LOGPATH ?= $(HOME)/Library/Logs/displaykeep.log
 OUT     := .build
 APPNAME := DisplayKeep.app
 APP     := $(OUT)/$(APPNAME)
+PKGNAME := displaykeep-$(VERSION)
 BIN     := $(APP)/Contents/MacOS/displaykeep
 INSTALLED := $(APPDIR)/$(APPNAME)
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
@@ -35,13 +37,14 @@ run-headless: build
 # override the poll interval: make install INTERVAL=5
 # for a regexp filter, edit ProgramArguments in the generated plist (add -m <app>)
 install: build migrate
-	mkdir -p $(APPDIR) $(PREFIX) $(HOME)/Library/LaunchAgents
+	mkdir -p $(APPDIR) $(PREFIX) $(HOME)/Library/LaunchAgents $(dir $(LOGPATH))
 	$(LSREGISTER) -u "$(INSTALLED)" 2>/dev/null || true
 	rm -rf $(INSTALLED)
 	ditto $(APP) $(INSTALLED)
 	ln -sfn $(INSTALLED)/Contents/MacOS/displaykeep $(PREFIX)/displaykeep
 	sed -e 's|@LABEL@|$(LABEL)|g' \
 	    -e 's|@BIN@|$(INSTALLED)/Contents/MacOS/displaykeep|g' \
+	    -e 's|@LOGPATH@|$(LOGPATH)|g' \
 	    -e 's|@INTERVAL@|$(INTERVAL)|g' displaykeep.plist.in > $(PLIST)
 	plutil -lint $(PLIST)
 	launchctl bootout gui/$$(id -u)/$(LABEL) 2>/dev/null || true
@@ -88,11 +91,24 @@ on:
 
 status:
 	@$(PREFIX)/displaykeep status || true
-	@launchctl print gui/$$(id -u)/$(LABEL) 2>/dev/null | rg 'state|pid' || echo "agent not loaded"
-	@pmset -g assertions | rg 'PreventUserIdleDisplaySleep|displaykeep' || true
+	@printf 'agent: '
+	@launchctl print gui/$$(id -u)/$(LABEL) 2>/dev/null \
+	    | sed -n 's/^[[:space:]]*state = \(.*\)/\1/p' | head -1 || echo "not loaded"
+	@launchctl print gui/$$(id -u)/$(LABEL) 2>/dev/null \
+	    | sed -n 's/^[[:space:]]*pid = \(.*\)/pid \1/p' | head -1
+	@pmset -g assertions | sed -n '/PreventUserIdleDisplaySleep/p' || true
 
 log:
-	tail -f /tmp/displaykeep.log
+	tail -n 40 -F $(LOGPATH)
+
+# release artifact: the ad-hoc signed .app, zipped (ditto keeps the bundle intact)
+package: build
+	rm -rf $(OUT)/pkg && mkdir -p $(OUT)/pkg
+	ditto $(APP) $(OUT)/pkg/$(APPNAME)
+	ditto -c -k --norsrc --keepParent $(OUT)/pkg/$(APPNAME) $(OUT)/$(PKGNAME).zip
+	@shasum -a 256 $(OUT)/$(PKGNAME).zip
+	@echo "next: gh release create v$(VERSION) $(OUT)/$(PKGNAME).zip \\"
+	@echo "        --title v$(VERSION) --notes-file CHANGELOG.md"
 
 # unregister the dev build so Spotlight / "Open With" only ever see ~/Applications
 # (a hidden build dir is not indexed by mds at all; this covers the rebuild case)
@@ -100,4 +116,4 @@ clean:
 	-$(LSREGISTER) -u $(APP) 2>/dev/null
 	rm -rf $(OUT)
 
-.PHONY: build run run-headless install migrate uninstall pause resume toggle off on status log clean
+.PHONY: build run run-headless install migrate uninstall pause resume toggle off on status log package clean

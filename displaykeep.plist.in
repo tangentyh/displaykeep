@@ -26,9 +26,9 @@
 	<key>LimitLoadToSessionType</key>
 	<string>Aqua</string>
 	<key>StandardOutPath</key>
-	<string>/tmp/displaykeep.log</string>
+	<string>@LOGPATH@</string>
 	<key>StandardErrorPath</key>
-	<string>/tmp/displaykeep.log</string>
+	<string>@LOGPATH@</string>
 	<key>Nice</key>
 	<integer>5</integer>
 </dict>
