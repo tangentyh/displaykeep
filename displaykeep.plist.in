@@ -7,8 +7,6 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>@BIN@</string>
-		<string>-i</string>
-		<string>@INTERVAL@</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -25,10 +23,10 @@
 	<string>Interactive</string>
 	<key>LimitLoadToSessionType</key>
 	<string>Aqua</string>
-	<key>StandardOutPath</key>
-	<string>@LOGPATH@</string>
-	<key>StandardErrorPath</key>
-	<string>@LOGPATH@</string>
+	<!-- No StandardOutPath/StandardErrorPath on purpose: the app opens the log itself
+	     (see openLogFile in DisplayKeep.swift) so that a login-item launch — which has no
+	     plist at all — logs to the same file. Pointing both at one file is harmless
+	     (both append) but redundant. -->
 	<key>Nice</key>
 	<integer>5</integer>
 </dict>

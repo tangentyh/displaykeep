@@ -36,13 +36,15 @@ it releases the display as soon as the last one stops.
 ### From a release (no Xcode needed)
 
 ```sh
-unzip -o displaykeep-1.2.zip -d ~/Applications
+unzip -o displaykeep-1.3.zip -d ~/Applications
 xattr -dr com.apple.quarantine ~/Applications/DisplayKeep.app    # see below
 open ~/Applications/DisplayKeep.app
 ```
 
-Then add `DisplayKeep.app` to System Settings → General → **Login Items** if you want it to
-start at login. It is an `LSUIElement` app: menu bar only, no Dock icon, no windows.
+Click the menu bar icon and pick **Start at login** if you want it to run from now on.
+That registers it with macOS as a login item (`SMAppService`), so it shows up — and can be
+turned off — in System Settings → General → **Login Items**. It is an `LSUIElement` app:
+menu bar only, no Dock icon, no windows.
 
 > The release zip is **ad-hoc signed** (`codesign -s -`), not notarized — there is no
 > Developer ID behind it. macOS will refuse the first launch with "cannot be opened because
@@ -73,12 +75,15 @@ GitHub handle; override with `make install LABEL=…`):
 ~/Applications/DisplayKeep.app                    the app (single binary inside)
 ~/.local/bin/displaykeep -> .../MacOS/displaykeep CLI, same executable
 ~/Library/LaunchAgents/com.tangentyh.displaykeep.plist
-~/Library/Logs/displaykeep.log                    launchd stdout/stderr
+~/Library/Application Support/displaykeep/options.json
+~/Library/Logs/displaykeep.log                    app log (the app writes it itself)
 ```
 
-`make install` takes `INTERVAL=5` for the poll rate. The launchd path is worth preferring
-over Login Items: it restarts on crash, stays quit when you choose Quit, and has one place to
-look when something is off (`make status`).
+`make install` takes `INTERVAL=5` for the poll rate; a filter goes in `options.json` (next
+section). The launchd path is worth preferring over Login Items: it restarts on crash, stays
+quit when you choose Quit, and has one place to look when something is off (`make status`).
+The app's `Start at login` switch detects that agent and shows itself as managed rather than
+registering a second supervisor.
 
 Options (daemon):
 
@@ -90,7 +95,8 @@ Options (daemon):
 ./displaykeep -x                 # headless: no menu bar icon (for ssh/launchd debugging)
 ```
 
-For a filter under launchd, edit `ProgramArguments` in the generated plist (add `-m <app>`).
+For a filter under launchd, put it in `options.json` (below) — argv is only read when you
+run the app yourself.
 
 ## The menu bar icon
 
@@ -109,12 +115,39 @@ Left to right in the image above: **holding**, **armed**, **paused**.
 and re-acquires. Hover the icon for the same line plus the trigger that caused it.
 
 Click the icon for the menu: current state, the live trigger list (`app(pid) — assertion`),
-**Pause / Resume**, **Pause for…** (15 m / 30 m / 1 h / 4 h), the poll settings, the log, and
-Quit. `⌘P` toggles, `⌘Q` quits.
+**Pause / Resume**, **Pause for…** (15 m / 30 m / 1 h / 4 h), **Start at login**, the poll
+settings, the log, and Quit. `⌘P` toggles, `⌘Q` quits.
 
 The glyph is a template image, so it follows the menu bar appearance; the two idle states are
 dimmed with `appearsDisabled` rather than a hardcoded colour, which is what keeps the icon
 legible over both a light and a dark menu bar.
+
+## Start at login
+
+One switch in the menu, **Start at login**. There is deliberately no choice of mechanism:
+which supervisor runs the app is an implementation detail, and two of them at once is how
+you get a "Quit" that sometimes comes back.
+
+| Menu item | Means |
+| --- | --- |
+| `Start at login` unchecked | nothing starts it — you launched it by hand |
+| `Start at login` checked | registered as a login item via `SMAppService` |
+| `Start at login — approve in System Settings…` | registered, but a human has to say yes; clicking opens the Login Items pane |
+| `Start at login — launchd agent` (greyed) | `make install` set up a LaunchAgent; the switch defers to it |
+| `Start at login — move it to Applications first` (greyed) | running from a quarantined download (App Translocation) or the dev build in `.build/` |
+
+```sh
+displaykeep login             # on / off / unavailable, exit 0 when on
+make login-on                 # same, through the installed CLI
+make login-off
+```
+
+What the login-item path gives up against the launchd agent: `KeepAlive` (no restart after a
+crash) and `Nice`. What it gains: the app is visible in System Settings → Login Items where
+the user already looks, instead of a plist in `~/Library/LaunchAgents` that outlives the app.
+In both cases a clean **Quit** stays quit until the next login. Registering from inside the
+app also survives being moved to `/Applications` — a `SMAppService.agent` plist could not,
+because its path has to be baked in at build time.
 
 ## Toggling without the mouse
 
@@ -166,10 +199,20 @@ All under `~/Library/Application Support/displaykeep/`:
 | `state.json` | pid, holding, verified, paused, triggers, tick counter, last error — rewritten every tick (atomic) |
 | `paused` | present = paused; contents = epoch deadline or `forever` |
 | `lock` | `flock`, so a second instance exits instead of adding a second menu bar icon |
+| `options.json` | `interval` and `match`, read at startup — the only way settings survive a login-item launch, which has no argv |
 
-The log is `~/Library/Logs/displaykeep.log` (menu → Open log, or `make log`). Under /tmp it
-was world-readable and got cleaned out from under launchd; now it is per-user, and it is
+The log is `~/Library/Logs/displaykeep.log` (menu → Open log, or `make log`). The app opens
+it itself (and `dup2`s stderr into it) instead of relying on launchd's `StandardOutPath`, so
+a login-item launch logs to the same file as an agent launch. Under /tmp it was
+world-readable and got cleaned out from under launchd; now it is per-user, and it is
 truncated at startup once it passes ~1 MiB so a long-lived daemon stays bounded.
+
+`options.json` is what a supervisor launch sees, since `SMAppService` and launchd start the
+app without arguments; explicit flags still win when you run it yourself:
+
+```json
+{ "interval": 5, "match": "NeteaseMusic" }
+```
 
 ## How it works
 
@@ -207,6 +250,20 @@ kill -SEGV                        restarted by launchd after ThrottleInterval (1
 
 with a test holder (`/tmp/dksim`, the same IOKit call an audio player makes), plus release on
 SIGINT/SIGTERM/SIGHUP, and the menu bar icon present as an `LSUIElement` app under launchd.
+
+The login item path was verified the same way, from an ad-hoc signed copy in `~/Applications`
+(not `/Applications`):
+
+```
+displaykeep login status          off — not registered            (exit 1)
+displaykeep login on              on  — login item, registered     (exit 0)
+sfltool dumpbtm                   Identifier: 2.<bundle id>, Disposition: [enabled, allowed, notified]
+displaykeep login off             off                              (exit 1)
+make install                      Start at login — launchd agent   (switch defers to the plist)
+```
+
+If `SMAppService.mainApp.status` reads `.notFound`, that just means "not registered yet" on a
+fresh unsigned-by-anyone bundle — `register()` still succeeds; do not treat it as an error.
 
 ## Gotchas
 

@@ -5,7 +5,7 @@ LABEL   ?= com.tangentyh.displaykeep
 # set on the command line to retire an older agent label in one shot:
 #   make install LEGACY=com.old.handle.displaykeep
 LEGACY  ?=
-VERSION ?= 1.2
+VERSION ?= 1.3
 LOGPATH ?= $(HOME)/Library/Logs/displaykeep.log
 OUT     := .build
 APPNAME := DisplayKeep.app
@@ -35,24 +35,31 @@ run-headless: build
 	$(BIN) -v -x
 
 # override the poll interval: make install INTERVAL=5
-# for a regexp filter, edit ProgramArguments in the generated plist (add -m <app>)
+# for a regexp filter, put it in options.json (see below) or edit ProgramArguments in the
+# generated plist (add -m <app>)
 install: build migrate
-	mkdir -p $(APPDIR) $(PREFIX) $(HOME)/Library/LaunchAgents $(dir $(LOGPATH))
+	mkdir -p $(APPDIR) $(PREFIX) $(HOME)/Library/LaunchAgents "$(HOME)/Library/Application Support/displaykeep"
 	$(LSREGISTER) -u "$(INSTALLED)" 2>/dev/null || true
 	rm -rf $(INSTALLED)
 	ditto $(APP) $(INSTALLED)
 	ln -sfn $(INSTALLED)/Contents/MacOS/displaykeep $(PREFIX)/displaykeep
 	sed -e 's|@LABEL@|$(LABEL)|g' \
 	    -e 's|@BIN@|$(INSTALLED)/Contents/MacOS/displaykeep|g' \
-	    -e 's|@LOGPATH@|$(LOGPATH)|g' \
-	    -e 's|@INTERVAL@|$(INTERVAL)|g' displaykeep.plist.in > $(PLIST)
+	    displaykeep.plist.in > $(PLIST)
 	plutil -lint $(PLIST)
+	# the app reads these when launched with no argv (login items, and this agent)
+	printf '{\n  "interval": %s\n}\n' "$(INTERVAL)" \
+	    > "$(HOME)/Library/Application Support/displaykeep/options.json"
 	launchctl bootout gui/$$(id -u)/$(LABEL) 2>/dev/null || true
 	launchctl enable gui/$$(id -u)/$(LABEL) 2>/dev/null || true
 	launchctl bootstrap gui/$$(id -u) $(PLIST)
 	launchctl kickstart -k gui/$$(id -u)/$(LABEL)
 	$(LSREGISTER) -f "$(INSTALLED)" 2>/dev/null || true
 	@echo "installed as $(LABEL); icon appears in the menu bar. status: displaykeep status"
+	@echo ""
+	@echo "this is the launchd agent path: the app's \"Start at login\" switch will show it"
+	@echo "as managed and leave it alone. to start at login WITHOUT an agent instead"
+	@echo "(no KeepAlive restart), use make uninstall, then the menu's checkbox."
 
 # one-time: retire the pre-rename agent, its plist and its LaunchServices record
 migrate:
@@ -89,8 +96,16 @@ on:
 	launchctl bootstrap gui/$$(id -u) $(PLIST)
 	$(PREFIX)/displaykeep resume || true
 
+# start at login the login-item way (no launchd agent, no crash restart)
+login-on:
+	$(PREFIX)/displaykeep login on || true
+login-off:
+	$(PREFIX)/displaykeep login off || true
+
 status:
 	@$(PREFIX)/displaykeep status || true
+	@printf 'login: '
+	@$(PREFIX)/displaykeep login status || true
 	@printf 'agent: '
 	@launchctl print gui/$$(id -u)/$(LABEL) 2>/dev/null \
 	    | sed -n 's/^[[:space:]]*state = \(.*\)/\1/p' | head -1 || echo "not loaded"
@@ -116,4 +131,4 @@ clean:
 	-$(LSREGISTER) -u $(APP) 2>/dev/null
 	rm -rf $(OUT)
 
-.PHONY: build run run-headless install migrate uninstall pause resume toggle off on status log package clean
+.PHONY: build run run-headless install migrate uninstall pause resume toggle off on status log package clean login-on login-off

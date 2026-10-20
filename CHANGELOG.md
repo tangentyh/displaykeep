@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.3
+
+- **Start at login** is now a switch in the menu bar (and `displaykeep login [on|off|status]`),
+  for people who installed a release zip and never see the Makefile. It registers the app as
+  a login item through `SMAppService`, so it is visible and removable in System Settings →
+  General → Login Items instead of being a plist that outlives the bundle.
+- One mechanism at a time, chosen by the app: if a LaunchAgent from `make install` exists the
+  switch shows "launchd agent" and refuses to register a second supervisor. Registration is
+  refused outright when running from a quarantined download (App Translocation) or from
+  `.build/`, where the registered path would not survive a reboot.
+- `options.json` in the app support directory supplies `interval` / `match` to a supervised
+  launch, which has no argv. `make install` writes it (`INTERVAL=…`), and the LaunchAgent
+  plist no longer passes `-i`.
+- The app opens `~/Library/Logs/displaykeep.log` itself and redirects stderr into it, instead
+  of depending on launchd's `StandardOutPath`. "Open log" now works for a login-item launch.
+- `make status` reports the login state; `make login-on` / `make login-off` mirror the switch.
+
 ## 1.2
 
 - Log moved from `/tmp/displaykeep.log` to `~/Library/Logs/displaykeep.log` (per-user,

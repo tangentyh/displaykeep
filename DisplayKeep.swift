@@ -30,13 +30,24 @@
 //   state.json  written every tick; the CLI and any widget read it
 //   paused      present = paused; contents = epoch deadline, or "forever"
 //   lock        flock, so a second instance does not add a second menu bar icon
-// plus ~/Library/Logs/displaykeep.log, which launchd writes our stdout into.
+// plus ~/Library/Logs/displaykeep.log, which the app opens itself (see openLogFile) so the
+// log works the same whether we were started by a launchd agent or as a login item.
+//
+// START AT LOGIN: one user-facing switch, two possible supervisors behind it.
+//   * SMAppService.mainApp — the release/drag-install path, visible under System
+//     Settings > General > Login Items, no plist to write.
+//   * a LaunchAgent plist in ~/Library/LaunchAgents — what `make install` sets up for
+//     source users (KeepAlive restart, launchctl disable to persist "off").
+// The menu never offers the choice: it shows whether *a* supervisor exists and leaves
+// the existing one alone instead of stacking a second one on top.
 
 import Foundation
 import IOKit.pwr_mgt
 import AppKit
+import ServiceManagement
 
-let displaykeepVersion = "1.2"
+let displaykeepVersion = "1.3"
+let bundleID = Bundle.main.bundleIdentifier ?? "com.tangentyh.displaykeep"
 
 // MARK: - paths
 
@@ -46,6 +57,9 @@ let supportDir = FileManager.default
 let stateURL = supportDir.appendingPathComponent("state.json")
 let pauseURL = supportDir.appendingPathComponent("paused")
 let lockURL = supportDir.appendingPathComponent("lock")
+let optionsURL = supportDir.appendingPathComponent("options.json")
+let launchAgentURL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/LaunchAgents/\(bundleID).plist")
 
 // Logs belong in ~/Library/Logs, not /tmp: per-user, not world-readable, and not
 // reaped by the periodic /tmp clean-out while launchd still holds the fd.
@@ -60,17 +74,25 @@ func ensureSupportDir() {
         attributes: [.posixPermissions: 0o700])
 }
 
-/// Called once at startup. Under launchd, StandardOutPath is opened by launchd before
-/// we run, so we cannot create the file — only the directory (the Makefile does it at
-/// install time). Truncate, never unlink: launchd keeps writing to the same fd, so an
-/// unlink would silently send the rest of the log to a deleted inode.
-func prepareLog() {
+/// Own the log ourselves instead of leaning on launchd's StandardOutPath: a login-item
+/// launch has no plist, so stdout goes nowhere and "Open log" would sit empty forever.
+/// Truncate, never unlink — a re-exec'd launchd instance may still hold the fd, and an
+/// unlink would send the rest of its output to a deleted inode.
+var logFD: Int32 = -1
+
+// NB: no `openLog` here — the NSMenu action of that name would shadow it inside Daemon.
+func openLogFile() {
     try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
-    guard let attrs = try? FileManager.default.attributesOfItem(atPath: logPath),
-          let size = attrs[.size] as? NSNumber, size.intValue > 1 << 20,
-          let fh = FileHandle(forWritingAtPath: logPath) else { return }
-    try? fh.truncate(atOffset: 0)
-    try? fh.close()
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: logPath),
+       let size = attrs[.size] as? NSNumber, size.intValue > 1 << 20,
+       let fh = FileHandle(forWritingAtPath: logPath) {
+        try? fh.truncate(atOffset: 0)
+        try? fh.close()
+    }
+    logFD = open(logPath, O_WRONLY | O_APPEND | O_CREAT, 0o600)
+    // Crash traces (and anything AppKit prints) belong in the same file; without this
+    // they are only visible when a supervisor happens to redirect stderr for us.
+    if logFD >= 0 { dup2(logFD, STDERR_FILENO) }
 }
 
 // MARK: - state file
@@ -177,7 +199,12 @@ func fmtClock(_ ts: Double) -> String {
 func log(_ s: String) {
     let f = DateFormatter()
     f.dateFormat = "HH:mm:ss"
-    FileHandle.standardOutput.write("[\(f.string(from: Date()))] \(s)\n".data(using: .utf8)!)
+    let line = Data("[\(f.string(from: Date()))] \(s)\n".utf8)
+    if logFD >= 0 {
+        line.withUnsafeBytes { _ = write(logFD, $0.baseAddress, $0.count) }
+    } else {
+        FileHandle.standardOutput.write(line)   // CLI paths, or a log we could not open
+    }
 }
 
 // MARK: - assertion scanning
@@ -210,6 +237,21 @@ struct Options {
     var dryRun = false
     var verbose = false
     var headless = false
+}
+
+/// Persisted settings. A login-item launch has no argv (SMAppService starts the bundle,
+/// not a command line), so a configured interval or filter only survives a reboot if it
+/// comes from this file. Command line flags still override it.
+struct SavedOptions: Codable {
+    var interval: Double?
+    var match: String?
+    var anyMode: Bool?
+    var dryRun: Bool?
+}
+
+func loadSavedOptions() -> SavedOptions? {
+    guard let d = try? Data(contentsOf: optionsURL) else { return nil }
+    return try? JSONDecoder().decode(SavedOptions.self, from: d)
 }
 
 func isTrigger(pid: pid_t, proc: String, assertion: String, opts: Options) -> Bool {
@@ -261,6 +303,89 @@ func scan(_ opts: Options) -> Scan {
 /// Fresh single-purpose check, used right after acquiring so state.json never lies.
 func ownDisplayAssertionPresent() -> Bool {
     scan(Options(interval: 0, matchRE: nil, anyMode: true)).ownDisplayHeld
+}
+
+// MARK: - start at login
+
+/// One user-facing switch, several internal answers. The menu shows *whether* a
+/// supervisor exists and never offers a choice of mechanism.
+enum LoginState {
+    case enabled             // registered with macOS, runs at login
+    case needsApproval       // registered, but System Settings wants a human
+    case off
+    case launchdAgent        // a LaunchAgent plist owns us (make install); hands off
+    case unavailable(String)  // cannot register from where we are running
+}
+
+func loginStateIsOn() -> Bool {
+    switch loginState() {
+    case .enabled, .needsApproval, .launchdAgent: return true
+    case .off, .unavailable: return false
+    }
+}
+
+/// Checked before touching SMAppService. A quarantined download runs from a randomized
+/// read-only path (App Translocation), so registering it produces a login item whose
+/// target disappears at the next reboot — fail loudly instead of registering garbage.
+func loginBlocker() -> String? {
+    let path = Bundle.main.bundlePath
+    if path.contains("/AppTranslocation/") { return "move it to Applications first" }
+    if path.contains("/.build/") { return "this is a dev build — use make install" }
+    return nil
+}
+
+func loginState() -> LoginState {
+    // A launchd agent and a login item are two supervisors for one binary: registering
+    // both makes "Quit" mean different things depending on which one wins the race.
+    // Whichever already exists wins; we do not stack a second one on top.
+    if FileManager.default.fileExists(atPath: launchAgentURL.path) { return .launchdAgent }
+    if let why = loginBlocker() { return .unavailable(why) }
+    guard #available(macOS 13.0, *) else { return .unavailable("login items need macOS 13") }
+    switch SMAppService.mainApp.status {
+    case .enabled: return .enabled
+    case .requiresApproval: return .needsApproval
+    case .notRegistered, .notFound: return .off   // .notFound simply means "not registered yet"
+    @unknown default: return .off
+    }
+}
+
+/// nil on success, otherwise the text to show the user.
+func setLoginItem(_ on: Bool) -> String? {
+    // Never stack a login item on top of a LaunchAgent: two supervisors for one binary
+    // means "Quit" behaves differently depending on which one wins the race.
+    if FileManager.default.fileExists(atPath: launchAgentURL.path) {
+        return "a LaunchAgent already starts displaykeep at login (make uninstall to remove it)"
+    }
+    guard #available(macOS 13.0, *) else { return "login items need macOS 13" }
+    if let why = loginBlocker() { return why }
+    do {
+        if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+    } catch {
+        let msg = (error as NSError).localizedDescription
+        if logFD >= 0 { log("login item \(on ? "registration" : "removal") failed: \(msg)") }
+        return msg
+    }
+    if logFD >= 0 { log("login item \(on ? "registered" : "removed")") }
+    // register() can land in .requiresApproval and report success
+    if on, case .needsApproval = loginState() {
+        return "registered — approve displaykeep in System Settings > General > Login Items"
+    }
+    return nil
+}
+
+func openLoginItemsSettings() {
+    let s = "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"
+    if let u = URL(string: s) { NSWorkspace.shared.open(u) }
+}
+
+func loginSummary() -> String {
+    switch loginState() {
+    case .enabled: return "on  — login item, registered with macOS"
+    case .needsApproval: return "on  — approve it in System Settings > General > Login Items"
+    case .off: return "off — \"Start at login\" in the menu bar, or: displaykeep login on"
+    case .launchdAgent: return "on  — LaunchAgent \(launchAgentURL.path)"
+    case .unavailable(let why): return "unavailable — \(why)"
+    }
 }
 
 // MARK: - CLI
@@ -377,6 +502,22 @@ func runCLI(_ cmd: String, _ args: [String]) -> Never {
         nudgeDaemon()
         usleep(150_000)
         cliStatus(json: false)
+    case "login":
+        switch args.first(where: { !$0.hasPrefix("-") }) ?? "status" {
+        case "on", "off":
+            if let err = setLoginItem(args.contains("on")) {
+                FileHandle.standardError.write("displaykeep: \(err)\n".data(using: .utf8)!)
+                exit(69)
+            }
+            print(loginSummary())
+            exit(loginStateIsOn() ? 0 : 1)
+        case "status":
+            print(loginSummary())
+            exit(loginStateIsOn() ? 0 : 1)
+        default:
+            FileHandle.standardError.write("displaykeep: login takes on|off|status\n".data(using: .utf8)!)
+            exit(64)
+        }
     default:
         FileHandle.standardError.write("displaykeep: unknown command '\(cmd)'\n".data(using: .utf8)!)
         exit(64)
@@ -405,6 +546,9 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var tickCount = 0
     private var lastSignature = ""
     private var lastVisual = ""
+    /// Result of the last login-item action, shown under the menu item. Kept separate
+    /// from lastError: a failed registration is not a failed assertion.
+    private var loginNote: String?
 
     init(opts: Options) {
         self.opts = opts
@@ -424,7 +568,7 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         installSignalHandlers()
-        prepareLog()
+        openLogFile()
 
         if !opts.headless {
             statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -712,6 +856,15 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        menu.addItem(loginMenuItem())
+        if let note = loginNote {
+            let n = NSMenuItem(title: "   \(note)", action: nil, keyEquivalent: "")
+            n.isEnabled = false
+            menu.addItem(n)
+        }
+
+        menu.addItem(.separator())
+
         var info = "poll \(fmtDuration(opts.interval)) · "
         info += opts.matchRE.map { "filter /\($0.pattern)/" } ?? (opts.anyMode ? "any process" : "user processes")
         if opts.dryRun { info += " · dry run" }
@@ -729,6 +882,46 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let quit = NSMenuItem(title: "Quit displaykeep", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
+    }
+
+    /// One item, no mechanism choice. The state tells the truth about who is supervising
+    /// us: unchecked (nothing), checked (macOS login item), checked+disabled (a launchd
+    /// agent wrote a plist), or disabled with a reason we cannot register from here.
+    private func loginMenuItem() -> NSMenuItem {
+        let item: NSMenuItem
+        switch loginState() {
+        case .enabled:
+            item = NSMenuItem(title: "Start at login", action: #selector(toggleLogin), keyEquivalent: "")
+            item.state = .on
+        case .needsApproval:
+            // Clicking must not silently unregister what the user just asked for; send
+            // them to the only place that can actually fix it.
+            item = NSMenuItem(title: "Start at login — approve in System Settings…",
+                              action: #selector(openLoginItems), keyEquivalent: "")
+            item.state = .on
+        case .off:
+            item = NSMenuItem(title: "Start at login", action: #selector(toggleLogin), keyEquivalent: "")
+            item.state = .off
+        case .launchdAgent:
+            item = NSMenuItem(title: "Start at login — launchd agent", action: nil, keyEquivalent: "")
+            item.state = .on
+            item.isEnabled = false
+        case .unavailable(let why):
+            item = NSMenuItem(title: "Start at login — \(why)", action: nil, keyEquivalent: "")
+            item.state = .off
+            item.isEnabled = false
+        }
+        item.target = self
+        return item
+    }
+
+    @objc private func toggleLogin() {
+        loginNote = setLoginItem(!loginStateIsOn())
+        if loginNote != nil { NSSound.beep() }
+    }
+
+    @objc private func openLoginItems() {
+        openLoginItemsSettings()
     }
 
     @objc private func togglePause() {
@@ -770,6 +963,7 @@ func usage() -> Never {
       displaykeep pause [duration]       pause (default indefinitely; 30 = minutes, 45s, 1h30m)
       displaykeep resume                 resume
       displaykeep toggle                 flip paused state
+      displaykeep login [on|off|status]  start at login (login item / launchd agent)
 
     options:
       -i <secs>   poll interval (default 3)
@@ -781,12 +975,22 @@ func usage() -> Never {
       -h          this help
 
     files: \(supportDir.path)
-    log:   \(logPath)   (launchd stdout; ~1 MiB, truncated at startup)
+           options.json  interval / match, read when launched with no arguments
+    log:   \(logPath)   (~1 MiB, truncated at startup)
     """)
     exit(0)
 }
 
 var opts = Options()
+// Saved settings first, explicit flags on top: a login-item launch has no argv, so
+// options.json is the only way interval/match can survive a reboot.
+if let saved = loadSavedOptions() {
+    if let i = saved.interval { opts.interval = max(1, i) }
+    if let m = saved.match { opts.matchRE = try? NSRegularExpression(pattern: m) }
+    if saved.anyMode == true { opts.anyMode = true }
+    if saved.dryRun == true { opts.dryRun = true }
+}
+
 var argv = Array(CommandLine.arguments.dropFirst())
 while let a = argv.first {
     argv.removeFirst()
@@ -797,7 +1001,7 @@ while let a = argv.first {
     case "-n": opts.dryRun = true
     case "-v": opts.verbose = true
     case "-x", "--headless": opts.headless = true
-    case "status", "stat", "pause", "off", "resume", "on", "toggle":
+    case "status", "stat", "pause", "off", "resume", "on", "toggle", "login":
         runCLI(a, argv)                     // never returns; does not touch AppKit
     case "-h", "--help": usage()
     default:
