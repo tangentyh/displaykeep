@@ -584,9 +584,14 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
         t.resume()
         timer = t
 
-        log("watching (interval \(fmtDuration(opts.interval))\(opts.dryRun ? ", dry run" : "")"
-            + (opts.matchRE.map { ", match /\($0.pattern)/" } ?? "")
-            + (opts.anyMode ? ", any mode" : "") + (opts.headless ? ", headless" : "") + ")")
+        // one statement per flag: as a single concatenation this times out the type-checker
+        // on the older Swift in the CI runner image
+        var watching = "watching (interval \(fmtDuration(opts.interval))"
+        if opts.dryRun { watching += ", dry run" }
+        if let re = opts.matchRE { watching += ", match /\(re.pattern)/" }
+        if opts.anyMode { watching += ", any mode" }
+        if opts.headless { watching += ", headless" }
+        log(watching + ")")
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
