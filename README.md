@@ -33,6 +33,19 @@ it releases the display as soon as the last one stops.
 
 ## Install
 
+### Homebrew (tap)
+
+```sh
+brew install --cask tangentyh/tap/displaykeep
+```
+
+That puts `DisplayKeep.app` in `/Applications` and links the CLI into the Homebrew bin
+directory, so `displaykeep status` works without a checkout. It installs the same ad-hoc
+signed release zip described below; the tap clears the quarantine flag for you, which is the
+one Gatekeeper check `brew` would otherwise leave standing (see the note below).
+`brew upgrade --cask displaykeep` follows new releases, `brew uninstall --cask displaykeep`
+removes the app, and `--zap` takes the state file and log with it.
+
 ### From a release (no Xcode needed)
 
 ```sh
@@ -49,7 +62,8 @@ menu bar only, no Dock icon, no windows.
 > The release zip is **ad-hoc signed** (`codesign -s -`), not notarized — there is no
 > Developer ID behind it. macOS will refuse the first launch with "cannot be opened because
 > the developer cannot be verified". Right-click → **Open**, or run the `xattr` line above.
-> Building from source avoids the prompt entirely.
+> Building from source avoids the prompt entirely, and the Homebrew cask runs that `xattr`
+> step itself.
 
 ### From source (gets the launchd agent)
 
@@ -69,7 +83,9 @@ hidden directories, so a dev build never turns up as a second "displaykeep" in S
 also `lsregister -u`s the build copy for the window between build and clean.
 
 Installed layout (the label / bundle id is `com.tangentyh.displaykeep`, reverse-DNS of the
-GitHub handle; override with `make install LABEL=…`):
+GitHub handle; override with `make install LABEL=…`). A Homebrew install differs: the app
+sits in `/Applications`, the `displaykeep` link is in the Homebrew prefix, and there is no
+LaunchAgent — that path uses the login item instead:
 
 ```
 ~/Applications/DisplayKeep.app                    the app (single binary inside)
@@ -118,6 +134,10 @@ version, and the workflow additionally refuses a tag that is not an ancestor of 
 whose bundle `CFBundleShortVersionString` disagrees with it. The published body is the
 changelog section plus a fixed install/checksum trailer (`scripts/release-trailer.md.in`), so
 hand-cut and CI releases read the same.
+
+The cask in [`tangentyh/homebrew-tap`](https://github.com/tangentyh/homebrew-tap) follows a
+release on its own: the tap's `brew bump` workflow looks for the newest GitHub release daily
+and opens a version-plus-sha256 pull request, so tagging is still the only publish step.
 
 Versions are semver-ish: **minor** when the set of assertions that count changes (a new
 filter or exclusion) or the CLI/state-file surface grows, **patch** for the rest — the

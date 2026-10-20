@@ -8,6 +8,11 @@ by a script.
 
 ## [Unreleased]
 
+- Installable from Homebrew: `brew install --cask tangentyh/tap/displaykeep` puts the app in
+  `/Applications` and links the CLI, so `displaykeep status` works without a checkout. The
+  cask carries the quarantine-clearing step itself, since the release is ad-hoc signed — the
+  README and the release trailer now lead with this.
+
 ## [1.3] - 2026-10-20
 
 - **Start at login** is now a switch in the menu bar (and `displaykeep login [on|off|status]`),
