@@ -8,6 +8,12 @@ by a script.
 
 ## [Unreleased]
 
+- The menu bar item no longer moves when the state changes. The four states are four different
+  SF Symbols and so four different widths — 20pt for the cup, 17 for the warning triangle, 15
+  for `pause.circle` — and a variable-length status item takes its width from its image, so
+  pausing nudged the item and every menu bar item to its left 4 points sideways. Each glyph is
+  now drawn into a 20pt-wide canvas with its ink still centred, so the width is constant; the
+  symbols themselves are unchanged.
 - The bundle finally has an app icon: a display with a sun in it, on an indigo plate. It is
   drawn by `scripts/make-icon.swift` and packed with `iconutil` at build time rather than
   checked in as a `.icns`, so the sizes stay consistent and the repo still has no binary art;
