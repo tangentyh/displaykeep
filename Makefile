@@ -17,6 +17,12 @@ BIN     := $(APP)/Contents/MacOS/displaykeep
 ICONSET := $(OUT)/AppIcon.iconset
 ICNS    := $(APP)/Contents/Resources/AppIcon.icns
 INSTALLED := $(APPDIR)/$(APPNAME)
+# the throwaway copy `make dev` runs beside an installed app; nothing else reads it
+DEVROOT ?= /tmp/displaykeep-dev
+DEVAPP  := $(DEVROOT)/$(APPNAME:.app=-dev.app)
+DEVBIN  := $(DEVAPP)/Contents/MacOS/displaykeep
+DEVPID  := $(DEVROOT)/pid
+DEVHOME := $(DEVROOT)/home
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
 PLIST   := $(HOME)/Library/LaunchAgents/$(LABEL).plist
 INTERVAL ?= 3
@@ -78,6 +84,67 @@ install: build migrate
 	@echo "this is the launchd agent path: the app's \"Start at login\" switch will show it"
 	@echo "as managed and leave it alone. to start at login WITHOUT an agent instead"
 	@echo "(no KeepAlive restart), use make uninstall, then the menu's checkbox."
+
+# Stop the copy we started, and only that: the recorded pid is checked against the dev binary
+# first, so a recycled pid cannot take an unrelated process down with it, and the recipe waits
+# for the daemon to go (it releases the assertion on TERM) before its bundle is replaced.
+# Not a target: it has to run inside `dev` and `dev-clean`, not as a prerequisite in between.
+define stop-dev-copy
+	@pid=$$(cat $(DEVPID) 2>/dev/null); \
+	if [ -n "$$pid" ] && [ "$$(ps -p "$$pid" -o comm= 2>/dev/null)" = "$(DEVBIN)" ]; then \
+	    kill "$$pid" 2>/dev/null || true; \
+	    n=0; while kill -0 "$$pid" 2>/dev/null && [ $$n -lt 20 ]; do sleep 0.1; n=$$((n+1)); done; \
+	fi; \
+	rm -f $(DEVPID)
+endef
+
+# a second instance beside whatever is installed, without touching it — for watching a build
+# hold its own assertion next to the release's one, or for testing a glyph/state change you do
+# not want to install. `make dev-clean` undoes it.
+#
+# Three things make the copy possible, and all three are load-bearing:
+#   * the daemon is single-instance (flock in ~/Library/Application Support/displaykeep/lock),
+#     so the copy needs a support dir of its own. HOME does NOT redirect Foundation on macOS;
+#     CFFIXED_USER_HOME does (support dir, ~/Library/Logs, homeDirectoryForCurrentUser).
+#   * it gets its own bundle id: the plist edit breaks the signature, so it is re-signed, and
+#     two LaunchServices records with one id make Finder's icon and the "Start at login" switch
+#     ambiguous. Turn that switch off from the dev copy's own menu before dev-clean; it is a
+#     separate login item, and deleting the bundle would orphan it.
+#   * it is not `make install`: that writes options.json into the shared support dir and
+#     bootstraps a LaunchAgent, which would fight the installed copy for the same binary.
+dev: build
+	$(stop-dev-copy)
+	@mkdir -p $(DEVROOT)
+	@$(LSREGISTER) -u "$(DEVAPP)" 2>/dev/null || true
+	@rm -rf "$(DEVAPP)" $(DEVHOME)
+	ditto $(APP) "$(DEVAPP)"
+	plutil -replace CFBundleIdentifier -string $(LABEL).dev "$(DEVAPP)/Contents/Info.plist"
+	codesign --force --sign - "$(DEVAPP)"
+	@$(LSREGISTER) -f "$(DEVAPP)" 2>/dev/null || true
+	@nohup env CFFIXED_USER_HOME=$(DEVHOME) "$(DEVBIN)" -v >/dev/null 2>&1 & echo $$! > $(DEVPID)
+	@sleep 1; if kill -0 "$$(cat $(DEVPID))" 2>/dev/null; then \
+	    echo "dev copy running (pid $$(cat $(DEVPID))) as $(LABEL).dev"; \
+	    echo "  state:  $(DEVHOME)/Library/Application Support/displaykeep"; \
+	    echo "  log:    $(DEVHOME)/Library/Logs/displaykeep.log"; \
+	    echo "  status: make dev-status        remove: make dev-clean"; \
+	else \
+	    echo "dev copy exited at startup — see $(DEVHOME)/Library/Logs/displaykeep.log" >&2; \
+	    tail -n 5 "$(DEVHOME)/Library/Logs/displaykeep.log" 2>/dev/null >&2; \
+	    exit 1; \
+	fi
+
+# the dev copy's own state, from its own env — `displaykeep status` without the env var reads
+# the installed app's support dir and answers a different question
+dev-status:
+	@env CFFIXED_USER_HOME=$(DEVHOME) "$(DEVBIN)" status || true
+
+# quit it, forget its LaunchServices record, drop the whole tree: /tmp, ~/Applications and
+# /Applications are not touched
+dev-clean:
+	$(stop-dev-copy)
+	@$(LSREGISTER) -u "$(DEVAPP)" 2>/dev/null || true
+	@rm -rf $(DEVROOT)
+	@echo "removed $(DEVROOT); the installed copy was not touched"
 
 # one-time: retire the pre-rename agent, its plist and its LaunchServices record
 migrate:
@@ -166,4 +233,4 @@ clean:
 	-$(LSREGISTER) -u $(APP) 2>/dev/null
 	rm -rf $(OUT)
 
-.PHONY: build run run-headless install migrate uninstall pause resume toggle off on status log notes package clean login-on login-off icon
+.PHONY: build run run-headless install migrate uninstall pause resume toggle off on status log notes package clean login-on login-off icon dev dev-status dev-clean
