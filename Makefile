@@ -135,7 +135,9 @@ package: build
 	rm -rf $(OUT)/pkg && mkdir -p $(OUT)/pkg
 	ditto $(APP) $(OUT)/pkg/$(APPNAME)
 	ditto -c -k --norsrc --keepParent $(OUT)/pkg/$(APPNAME) $(OUT)/$(PKGNAME).zip
-	@shasum -a 256 $(OUT)/$(PKGNAME).zip | tee $(OUT)/$(PKGNAME).zip.sha256
+	# hashed from inside $(OUT) so the checksum names the asset, not the build path —
+	# `shasum -a 256 -c displaykeep-<v>.zip.sha256` has to work in a download directory
+	@cd $(OUT) && shasum -a 256 $(PKGNAME).zip | tee $(PKGNAME).zip.sha256
 	@sed -e 's|@PKGNAME@|$(PKGNAME)|g' \
 	     -e "s|@SHA@|$$(cut -d' ' -f1 $(OUT)/$(PKGNAME).zip.sha256)|g" \
 	     scripts/release-trailer.md.in >> $(NOTESFILE)
