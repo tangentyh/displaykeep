@@ -759,8 +759,9 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         var symbol: String {
             switch self {
-            case .holding: return "cup.and.saucer.fill"
-            case .armed: return "cup.and.saucer"
+            // The display is the app: no caffeine metaphor, and the same monitor the app icon
+            // draws the sun into. `armed` is this glyph dimmed — a screen that may sleep.
+            case .holding, .armed: return "display"
             case .paused: return "pause.circle"
             case .failed: return "exclamationmark.triangle.fill"
             }
@@ -793,12 +794,12 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// The four states are four different SF Symbols, and so four different widths: 20pt for
-    /// the cup, 17 for the warning triangle, 15 for `pause.circle`. A variable-length status
-    /// item takes its width from its image, so left alone the item — and with it every menu
-    /// bar item to its left — shifted 4pt every time the state changed. Each glyph is drawn
-    /// into a canvas as wide as the widest of them; its ink is already centred inside the
-    /// symbol's own bounds, so the glyph stays put and the item keeps one width.
+    /// The glyphs are different SF Symbols, and so different widths: 19pt for the display, 17
+    /// for the warning triangle, 15 for `pause.circle`. A variable-length status item takes its
+    /// width from its image, so left alone the item — and with it every menu bar item to its
+    /// left — shifted 4pt every time the state changed. Each glyph is drawn into a canvas as
+    /// wide as the widest of them; its ink is already centred inside the symbol's own bounds,
+    /// so the glyph stays put and the item keeps one width.
     private lazy var statusGlyphs: [Visual: NSImage] = {
         var symbols: [(Visual, NSImage)] = []
         for v in Visual.allCases {

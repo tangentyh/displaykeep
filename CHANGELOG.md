@@ -8,18 +8,23 @@ by a script.
 
 ## [Unreleased]
 
-- The menu bar item no longer moves when the state changes. The four states are four different
-  SF Symbols and so four different widths — 20pt for the cup, 17 for the warning triangle, 15
-  for `pause.circle` — and a variable-length status item takes its width from its image, so
-  pausing nudged the item and every menu bar item to its left 4 points sideways. Each glyph is
-  now drawn into a 20pt-wide canvas with its ink still centred, so the width is constant; the
-  symbols themselves are unchanged.
+- The menu bar glyph is a **display**, not a coffee cup. The cup said "caffeine", which is one
+  way to keep a machine awake but not this app's job — it holds a display assertion — and it
+  disagreed with the app icon, which is the same monitor with a sun in it. `holding` and
+  `armed` are that one glyph at two opacities, which is also how the state reads: a bright
+  screen being held awake, a dim one that may sleep. `docs/menubar.png` is now rendered by
+  `scripts/menubar-sheet.swift` from the same symbols instead of screenshotted, so the
+  picture cannot drift from the code.
+- The menu bar item no longer moves when the state changes. The state glyphs are different SF
+  Symbols and so different widths — 19pt for the display, 17 for the warning triangle, 15 for
+  `pause.circle` — and a variable-length status item takes its width from its image, so
+  pausing nudged the item and every menu bar item to its left 4 points sideways. Each glyph
+  is now drawn into a 19pt-wide canvas with its ink still centred, so the width is constant.
 - The bundle finally has an app icon: a display with a sun in it, on an indigo plate. It is
   drawn by `scripts/make-icon.swift` and packed with `iconutil` at build time rather than
   checked in as a `.icns`, so the sizes stay consistent and the repo still has no binary art;
   `make icon` redraws it. Until now the bundle had no `CFBundleIconFile` at all, so Finder,
-  Spotlight and System Settings → Login Items showed the generic document icon. The menu bar
-  glyph is unchanged.
+  Spotlight and System Settings → Login Items showed the generic document icon.
 - Installable from Homebrew: `brew install --cask tangentyh/tap/displaykeep` puts the app in
   `/Applications` and links the CLI, so `displaykeep status` works without a checkout. The
   cask carries the quarantine-clearing step itself, since the release is ad-hoc signed — the
