@@ -12,6 +12,11 @@ by a script.
   `/Applications` and links the CLI, so `displaykeep status` works without a checkout. The
   cask carries the quarantine-clearing step itself, since the release is ad-hoc signed — the
   README and the release trailer now lead with this.
+- The build is now visible: a grey `displaykeep 1.3 · macOS 14.2` row at the bottom of the
+  menu, `displaykeep --version` (`-V`, or `displaykeep version`), and the version named in
+  the startup log line. Before this it appeared only in `state.json`, so an issue about a
+  filter that stopped matching on a new macOS could not say which build was being tested —
+  and the OS release sits on the same row because that is the other half of the answer.
 
 ## [1.3] - 2026-10-20
 

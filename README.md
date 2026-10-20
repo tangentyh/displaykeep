@@ -162,7 +162,12 @@ and re-acquires. Hover the icon for the same line plus the trigger that caused i
 
 Click the icon for the menu: current state, the live trigger list (`app(pid) — assertion`),
 **Pause / Resume**, **Pause for…** (15 m / 30 m / 1 h / 4 h), **Start at login**, the poll
-settings, the log, and Quit. `⌘P` toggles, `⌘Q` quits.
+settings, the log, the version, and Quit. `⌘P` toggles, `⌘Q` quits.
+
+The last grey row is `displaykeep 1.3 · macOS 14.2`. There is no About window — this app has
+none — and a version number is nearly all an About box would have to say. The OS release sits
+beside it because that is the other half of any report about the filters, which track IOKit
+internals that move between macOS releases.
 
 The glyph is a template image, so it follows the menu bar appearance; the two idle states are
 dimmed with `appearsDisabled` rather than a hardcoded colour, which is what keeps the icon
@@ -221,6 +226,7 @@ across login — `bootout` alone comes back at the next login).
 ## Scripting against it
 
 ```sh
+displaykeep --version       # displaykeep 1.3 (also -V, or `displaykeep version`)
 displaykeep status          # human line + exit code
 displaykeep status --json   # raw state file
 ```

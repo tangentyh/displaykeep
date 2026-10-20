@@ -586,7 +586,7 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // one statement per flag: as a single concatenation this times out the type-checker
         // on the older Swift in the CI runner image
-        var watching = "watching (interval \(fmtDuration(opts.interval))"
+        var watching = "displaykeep \(displaykeepVersion) — watching (interval \(fmtDuration(opts.interval))"
         if opts.dryRun { watching += ", dry run" }
         if let re = opts.matchRE { watching += ", match /\(re.pattern)/" }
         if opts.anyMode { watching += ", any mode" }
@@ -884,6 +884,17 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        // No About window, and no About item either: this is a menu bar extra with no
+        // windows to put one in, and the whole point of an About box here is the version
+        // number — which a bug report also needs the OS release next to, since the filters
+        // follow IOKit internals that move between macOS releases.
+        let osv = ProcessInfo.processInfo.operatingSystemVersion
+        let versionItem = NSMenuItem(
+            title: "displaykeep \(displaykeepVersion) · macOS \(osv.majorVersion).\(osv.minorVersion)",
+            action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+
         let quit = NSMenuItem(title: "Quit displaykeep", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
@@ -977,6 +988,7 @@ func usage() -> Never {
       -n          dry run: report only, never take the assertion
       -v          verbose
       -x          headless: no menu bar icon
+      -V          print the version
       -h          this help
 
     files: \(supportDir.path)
@@ -1006,6 +1018,7 @@ while let a = argv.first {
     case "-n": opts.dryRun = true
     case "-v": opts.verbose = true
     case "-x", "--headless": opts.headless = true
+    case "-V", "--version", "version": print("displaykeep \(displaykeepVersion)"); exit(0)
     case "status", "stat", "pause", "off", "resume", "on", "toggle", "login":
         runCLI(a, argv)                     // never returns; does not touch AppKit
     case "-h", "--help": usage()
