@@ -69,6 +69,7 @@ menu bar only, no Dock icon, no windows.
 
 ```sh
 make build                       # -> .build/DisplayKeep.app (ad-hoc signed, LSUIElement)
+make icon                        # redraw the app icon, then rebuild and re-sign
 make run                         # foreground, verbose, menu bar icon appears
 make install                     # ~/Applications/DisplayKeep.app + launchd agent
 make uninstall
@@ -172,6 +173,15 @@ internals that move between macOS releases.
 The glyph is a template image, so it follows the menu bar appearance; the two idle states are
 dimmed with `appearsDisabled` rather than a hardcoded colour, which is what keeps the icon
 legible over both a light and a dark menu bar.
+
+The **app icon** is the same idea in colour: a display on an indigo plate with a sun in it,
+because keeping the display awake is the whole job. It is drawn rather than checked in —
+`scripts/make-icon.swift` renders the ten sizes `iconutil` wants and `make build` packs them
+into `Contents/Resources/AppIcon.icns`, so there is no binary art in the repo and the icon is
+readable as Swift. `make icon` redraws and re-signs after you edit it. You will see it in
+Finder, Spotlight and System Settings → Login Items; the app is `LSUIElement`, so it never
+shows up in the Dock. LaunchServices caches a bundle's icon, so right after a rebuild Finder
+can still show the old (or generic) picture until it re-scans the bundle.
 
 ## Start at login
 
