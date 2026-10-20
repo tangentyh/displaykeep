@@ -54,13 +54,20 @@ jobs:
       - name: changelog has a section for that version
         run: scripts/release-notes.sh "$(make -s version)" > /dev/null
 
-      - name: bundle carries that version and a valid signature
+      - name: bundle carries that version, an icon and a valid signature
         run: |
           app=.build/DisplayKeep.app
           want=$(make -s version)
           got=$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")
           if [ "$got" != "$want" ]; then
             echo "::error::bundle version $got does not match Makefile VERSION $want"
+            exit 1
+          fi
+          # the icon is generated, so a broken make-icon.swift shows up as a bundle that
+          # builds and signs but has nothing for Finder to draw
+          icon=$(plutil -extract CFBundleIconFile raw "$app/Contents/Info.plist")
+          if [ ! -s "$app/Contents/Resources/$icon.icns" ]; then
+            echo "::error::$app/Contents/Resources/$icon.icns is missing or empty"
             exit 1
           fi
           codesign --verify --deep --strict "$app"

@@ -14,6 +14,8 @@ PKGNAME := displaykeep-$(VERSION)
 # releases are cut from CHANGELOG.md: the section for $(VERSION) is the release body
 NOTESFILE := $(OUT)/release-notes.md
 BIN     := $(APP)/Contents/MacOS/displaykeep
+ICONSET := $(OUT)/AppIcon.iconset
+ICNS    := $(APP)/Contents/Resources/AppIcon.icns
 INSTALLED := $(APPDIR)/$(APPNAME)
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
 PLIST   := $(HOME)/Library/LaunchAgents/$(LABEL).plist
@@ -21,12 +23,26 @@ INTERVAL ?= 3
 
 build: $(BIN)
 
-$(BIN): DisplayKeep.swift Info.plist displaykeep.plist.in
+# The bundle icon is drawn, not checked in: scripts/make-icon.swift renders every size and
+# iconutil packs them. It is a prerequisite of $(BIN) because the signature seals the bundle's
+# resources — a new icon without a re-sign is a bundle that fails codesign --verify.
+$(ICNS): scripts/make-icon.swift
+	mkdir -p $(APP)/Contents/Resources
+	rm -rf $(ICONSET)
+	swift scripts/make-icon.swift $(ICONSET)
+	iconutil -c icns $(ICONSET) -o $(ICNS)
+
+$(BIN): DisplayKeep.swift Info.plist displaykeep.plist.in $(ICNS)
 	mkdir -p $(APP)/Contents/MacOS
 	sed -e 's|@LABEL@|$(LABEL)|g' -e 's|@VERSION@|$(VERSION)|g' \
 	    Info.plist > $(APP)/Contents/Info.plist
 	swiftc -O -o $(BIN) DisplayKeep.swift
 	codesign --force --sign - $(APP)
+
+# redraw the icon after editing scripts/make-icon.swift; rebuilds and re-signs to match
+icon:
+	rm -rf $(ICONSET) $(ICNS)
+	$(MAKE) build
 
 # run in the foreground, verbose, with the menu bar icon
 run: build
@@ -150,4 +166,4 @@ clean:
 	-$(LSREGISTER) -u $(APP) 2>/dev/null
 	rm -rf $(OUT)
 
-.PHONY: build run run-headless install migrate uninstall pause resume toggle off on status log notes package clean login-on login-off
+.PHONY: build run run-headless install migrate uninstall pause resume toggle off on status log notes package clean login-on login-off icon

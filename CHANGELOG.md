@@ -8,6 +8,12 @@ by a script.
 
 ## [Unreleased]
 
+- The bundle finally has an app icon: a display with a sun in it, on an indigo plate. It is
+  drawn by `scripts/make-icon.swift` and packed with `iconutil` at build time rather than
+  checked in as a `.icns`, so the sizes stay consistent and the repo still has no binary art;
+  `make icon` redraws it. Until now the bundle had no `CFBundleIconFile` at all, so Finder,
+  Spotlight and System Settings → Login Items showed the generic document icon. The menu bar
+  glyph is unchanged.
 - Installable from Homebrew: `brew install --cask tangentyh/tap/displaykeep` puts the app in
   `/Applications` and links the CLI, so `displaykeep status` works without a checkout. The
   cask carries the quarantine-clearing step itself, since the release is ad-hoc signed — the
