@@ -5,7 +5,7 @@ LABEL   ?= com.tangentyh.displaykeep
 # set on the command line to retire an older agent label in one shot:
 #   make install LEGACY=com.old.handle.displaykeep
 LEGACY  ?=
-VERSION ?= 1.3
+VERSION ?= 1.3.1
 LOGPATH ?= $(HOME)/Library/Logs/displaykeep.log
 OUT     := .build
 APPNAME := DisplayKeep.app

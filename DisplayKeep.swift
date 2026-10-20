@@ -46,7 +46,7 @@ import IOKit.pwr_mgt
 import AppKit
 import ServiceManagement
 
-let displaykeepVersion = "1.3"
+let displaykeepVersion = "1.3.1"
 let bundleID = Bundle.main.bundleIdentifier ?? "com.tangentyh.displaykeep"
 
 // MARK: - paths
