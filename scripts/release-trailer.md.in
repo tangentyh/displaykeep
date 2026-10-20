@@ -1,7 +1,13 @@
 
 ---
 
-**Install** — the zip is ad-hoc signed, not notarized, so the first launch needs a
+**Install** — Homebrew is the short path:
+
+```sh
+brew install --cask tangentyh/tap/displaykeep
+```
+
+Or take the zip. It is ad-hoc signed, not notarized, so the first launch needs a
 right-click → **Open** (or the `xattr` line below). Details in the
 [README](https://github.com/tangentyh/displaykeep#install).
 
