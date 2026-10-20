@@ -73,6 +73,8 @@ make icon                        # redraw the app icon, then rebuild and re-sign
 make run                         # foreground, verbose, menu bar icon appears
 make install                     # ~/Applications/DisplayKeep.app + launchd agent
 make uninstall
+make dev                         # second copy under /tmp, beside whatever is installed
+make dev-clean                   # quit it and delete it
 make package                     # -> .build/displaykeep-<version>.zip for a release
 ```
 
@@ -114,6 +116,33 @@ Options (daemon):
 
 For a filter under launchd, put it in `options.json` (below) — argv is only read when you
 run the app yourself.
+
+### A dev copy beside the installed one
+
+To see a build hold its own assertion next to an installed release, or to try a glyph or
+state change without installing it, `make dev` runs a second copy with its own bundle id,
+state and log, all of it under `/tmp/displaykeep-dev`:
+
+```sh
+make dev          # build, copy, re-sign as com.tangentyh.displaykeep.dev, start it verbose
+make dev-status   # that copy's state, read from its own support dir
+make dev-clean    # quit it, forget its LaunchServices record, delete /tmp/displaykeep-dev
+```
+
+`~/Applications`, `/Applications` and your real `state.json` are never touched. The two menu
+bar icons are the point: pause one and the other keeps its assertion. Two things it cannot do
+for you — **do not flip "Start at login" in a dev copy**, because that registers a login item
+of its own that outlives the bundle (turn it off from the same menu before `make dev-clean`);
+and do not reach for `make install` here, since it writes `options.json` into the shared
+support dir and bootstraps an agent that would fight the installed copy.
+
+The redirection is the load-bearing part: the daemon is single-instance per support dir
+(`flock` in `~/Library/Application Support/displaykeep/lock`), and `HOME` does not redirect
+Foundation on macOS — `CFFIXED_USER_HOME` does, which is what gives the copy its own
+`~/Library/Application Support/displaykeep` and `~/Library/Logs/displaykeep.log`. The bundle
+id is rewritten too, because two LaunchServices records sharing one id make Finder's icon and
+the login-item switch ambiguous, and the copy is re-signed after that edit because an edited
+`Info.plist` fails the signature.
 
 ## Releases
 
