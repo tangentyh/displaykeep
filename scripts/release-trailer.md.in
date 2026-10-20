@@ -1,0 +1,19 @@
+
+---
+
+**Install** — the zip is ad-hoc signed, not notarized, so the first launch needs a
+right-click → **Open** (or the `xattr` line below). Details in the
+[README](https://github.com/tangentyh/displaykeep#install).
+
+```sh
+unzip -o @PKGNAME@.zip -d ~/Applications
+xattr -dr com.apple.quarantine ~/Applications/DisplayKeep.app
+open ~/Applications/DisplayKeep.app
+```
+
+Then click the menu bar icon → **Start at login** if you want it to run from now on.
+Needs macOS 13+; Apple silicon unless built on an Intel runner.
+
+```
+@SHA@  @PKGNAME@.zip
+```

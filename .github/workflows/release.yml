@@ -1,0 +1,63 @@
+name: release
+
+# A tag is the release: the CHANGELOG section for that version becomes the release body, and
+# the zip is built here rather than on someone's laptop, so the artifact is reproducible from
+# the tag alone. Tag, don't publish by hand:
+#
+#   make package && make notes VERSION=1.3     # eyeball the body
+#   git tag -a v1.3 -m 'displaykeep v1.3'
+#   git push --follow-tags
+#
+# The escape hatch, if a runner image breaks, is the same two commands plus
+#   gh release create v1.3 .build/displaykeep-1.3.zip .build/displaykeep-1.3.zip.sha256 \
+#     --notes-file .build/release-notes.md
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the ancestry check needs main, not just the tag
+
+      - name: refuse a tag that is not on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not an ancestor of main — tag the merge, not a branch"
+            exit 1
+          fi
+
+      # fails when CHANGELOG.md has no "## [<version>]" section, before anything is uploaded
+      - name: package
+        run: make package VERSION="${GITHUB_REF_NAME#v}"
+
+      - name: sanity-check the bundle
+        run: |
+          app=.build/DisplayKeep.app
+          want="${GITHUB_REF_NAME#v}"
+          got=$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")
+          if [ "$got" != "$want" ]; then
+            echo "::error::bundle version $got does not match tag $GITHUB_REF_NAME"
+            exit 1
+          fi
+          codesign --verify --deep --strict "$app"
+
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            ".build/displaykeep-$v.zip" \
+            ".build/displaykeep-$v.zip.sha256" \
+            --title "displaykeep $v" \
+            --notes-file .build/release-notes.md \
+            --verify-tag

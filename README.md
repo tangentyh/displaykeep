@@ -98,6 +98,32 @@ Options (daemon):
 For a filter under launchd, put it in `options.json` (below) — argv is only read when you
 run the app yourself.
 
+## Releases
+
+A tag is the release. `CHANGELOG.md` is the source of truth: the section under a version
+heading is copied verbatim into the GitHub release body, then the `release` workflow builds
+the zip on a macOS runner and publishes it — the artifact is reproducible from the tag alone.
+
+```sh
+# 1. write the section users will read: "## [1.4] - YYYY-MM-DD"
+# 2. bump VERSION in the Makefile, then eyeball the body and the artifact
+make notes VERSION=1.4            # the changelog section, exactly as published
+make package VERSION=1.4          # -> .build/displaykeep-1.4.zip, .zip.sha256, release-notes.md
+# 3. tag the commit that has the section; CI does the rest
+git tag -a v1.4 -m 'displaykeep v1.4' && git push --follow-tags
+```
+
+`make package` fails before writing the zip when `CHANGELOG.md` has no section for that
+version, and the workflow additionally refuses a tag that is not an ancestor of `main` or
+whose bundle `CFBundleShortVersionString` disagrees with it. The published body is the
+changelog section plus a fixed install/checksum trailer (`scripts/release-trailer.md.in`), so
+hand-cut and CI releases read the same.
+
+Versions are semver-ish: **minor** when the set of assertions that count changes (a new
+filter or exclusion) or the CLI/state-file surface grows, **patch** for the rest — the
+filters are the part that has to keep up with macOS, so minors are the normal bump. Nothing
+the release body would want to say may sit under `## [Unreleased]` at tag time.
+
 ## The menu bar icon
 
 Left to right in the image above: **holding**, **armed**, **paused**.

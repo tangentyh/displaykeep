@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.3
+Newest first. A heading is a git tag (`v1.3`) and the bullets under it are exactly the body of
+the GitHub release — `make notes` prints them, `make package` writes them to
+`.build/release-notes.md`, and the `release` workflow publishes that file. Loosely
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); no link refs, the headings are read
+by a script.
+
+## [Unreleased]
+
+## [1.3] - 2026-10-20
 
 - **Start at login** is now a switch in the menu bar (and `displaykeep login [on|off|status]`),
   for people who installed a release zip and never see the Makefile. It registers the app as
@@ -16,8 +24,10 @@
 - The app opens `~/Library/Logs/displaykeep.log` itself and redirects stderr into it, instead
   of depending on launchd's `StandardOutPath`. "Open log" now works for a login-item launch.
 - `make status` reports the login state; `make login-on` / `make login-off` mirror the switch.
+- Releases are cut from this changelog: a `v*` tag runs the `release` workflow, which builds
+  the zip with `make package` and publishes the matching section as the release body.
 
-## 1.2
+## [1.2] - 2026-10-17
 
 - Log moved from `/tmp/displaykeep.log` to `~/Library/Logs/displaykeep.log` (per-user,
   not world-readable, not reaped by the periodic `/tmp` clean-out). The file is truncated
@@ -27,7 +37,7 @@
   system and the idle states use `appearsDisabled` instead.
 - `make package` builds the release zip; `make status` no longer requires ripgrep.
 
-## 1.1
+## [1.1] - 2026-10-17
 
 - Menu bar indicator with four states (holding / armed / paused / failed), self-verified
   against IOKit after every acquisition.
@@ -36,7 +46,7 @@
 - Pause toggle, "Pause for…", and a `paused` flag file (`flock`-guarded daemon, one icon).
 - Install label moved to `com.tangentyh.displaykeep`.
 
-## 1.0
+## [1.0] - 2026-10-17
 
 - Hold `PreventUserIdleDisplaySleep` while another process holds
   `PreventUserIdleSystemSleep`, polled via `IOPMCopyAssertionsByProcess()`.

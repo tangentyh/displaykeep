@@ -11,6 +11,8 @@ OUT     := .build
 APPNAME := DisplayKeep.app
 APP     := $(OUT)/$(APPNAME)
 PKGNAME := displaykeep-$(VERSION)
+# releases are cut from CHANGELOG.md: the section for $(VERSION) is the release body
+NOTESFILE := $(OUT)/release-notes.md
 BIN     := $(APP)/Contents/MacOS/displaykeep
 INSTALLED := $(APPDIR)/$(APPNAME)
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
@@ -116,14 +118,24 @@ status:
 log:
 	tail -n 40 -F $(LOGPATH)
 
-# release artifact: the ad-hoc signed .app, zipped (ditto keeps the bundle intact)
+# the changelog section for $(VERSION): the exact body of the GitHub release
+notes:
+	@scripts/release-notes.sh $(VERSION)
+
+# release artifact: the ad-hoc signed .app, zipped (ditto keeps the bundle intact), plus the
+# release body (.build/release-notes.md) and checksum the release workflow uploads.
+# Fails, before writing the zip, when CHANGELOG.md has no section for $(VERSION).
 package: build
+	@scripts/release-notes.sh $(VERSION) > $(NOTESFILE)
 	rm -rf $(OUT)/pkg && mkdir -p $(OUT)/pkg
 	ditto $(APP) $(OUT)/pkg/$(APPNAME)
 	ditto -c -k --norsrc --keepParent $(OUT)/pkg/$(APPNAME) $(OUT)/$(PKGNAME).zip
-	@shasum -a 256 $(OUT)/$(PKGNAME).zip
-	@echo "next: gh release create v$(VERSION) $(OUT)/$(PKGNAME).zip \\"
-	@echo "        --title v$(VERSION) --notes-file CHANGELOG.md"
+	@shasum -a 256 $(OUT)/$(PKGNAME).zip | tee $(OUT)/$(PKGNAME).zip.sha256
+	@sed -e 's|@PKGNAME@|$(PKGNAME)|g' \
+	     -e "s|@SHA@|$$(cut -d' ' -f1 $(OUT)/$(PKGNAME).zip.sha256)|g" \
+	     scripts/release-trailer.md.in >> $(NOTESFILE)
+	@echo "body: $(NOTESFILE)"
+	@echo "tag:  git tag -a v$(VERSION) -m 'displaykeep v$(VERSION)' && git push --follow-tags"
 
 # unregister the dev build so Spotlight / "Open With" only ever see ~/Applications
 # (a hidden build dir is not indexed by mds at all; this covers the rebuild case)
@@ -131,4 +143,4 @@ clean:
 	-$(LSREGISTER) -u $(APP) 2>/dev/null
 	rm -rf $(OUT)
 
-.PHONY: build run run-headless install migrate uninstall pause resume toggle off on status log package clean login-on login-off
+.PHONY: build run run-headless install migrate uninstall pause resume toggle off on status log notes package clean login-on login-off
