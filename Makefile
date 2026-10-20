@@ -118,6 +118,11 @@ status:
 log:
 	tail -n 40 -F $(LOGPATH)
 
+# the version the three literals must agree on (Makefile, DisplayKeep.swift, CHANGELOG.md);
+# .github/workflows/build.yml asserts that they do
+version:
+	@echo $(VERSION)
+
 # the changelog section for $(VERSION): the exact body of the GitHub release
 notes:
 	@scripts/release-notes.sh $(VERSION)
