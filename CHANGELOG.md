@@ -8,6 +8,8 @@ by a script.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-21
+
 - The menu bar glyph is a **display**, not a coffee cup. The cup said "caffeine", which is one
   way to keep a machine awake but not this app's job — it holds a display assertion — and it
   disagreed with the app icon, which is the same monitor with a sun in it. `holding` and
@@ -34,6 +36,13 @@ by a script.
   the startup log line. Before this it appeared only in `state.json`, so an issue about a
   filter that stopped matching on a new macOS could not say which build was being tested —
   and the OS release sits on the same row because that is the other half of the answer.
+- A build can now be watched beside the installed app. `make dev` copies the built bundle to
+  `/tmp/displaykeep-dev`, gives it a bundle id of its own and its own `CFFIXED_USER_HOME`, and
+  starts it: two menu bar icons, two assertions, and nothing in `/Applications` or
+  `~/Applications` touched; `make dev-clean` takes it all away again. It is the only way to
+  watch this state machine without installing over the release — pause one icon and the other
+  keeps holding. The env var is `CFFIXED_USER_HOME` rather than `HOME` because `HOME` does not
+  redirect Foundation on macOS, which is also why this lived in a shell incantation until now.
 
 ## [1.3] - 2026-10-20
 
