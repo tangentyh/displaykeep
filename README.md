@@ -151,10 +151,16 @@ Left to right in the image above: **holding**, **armed**, **paused**.
 
 | Glyph | State | Meaning |
 | --- | --- | --- |
-| filled cup, normal tint | **holding** | we hold `PreventUserIdleDisplaySleep`; the display will not sleep |
-| outline cup, dimmed | **armed** | watching, but nothing holds the system awake — the display may sleep |
+| display, normal tint | **holding** | we hold `PreventUserIdleDisplaySleep`; the display will not sleep |
+| display, dimmed | **armed** | watching, but nothing holds the system awake — the display may sleep |
 | pause circle, dimmed | **paused** | you turned it off; the assertion is released |
 | orange warning triangle | **failed** | `IOPMAssertionCreateWithName` returned an error — the menu says which |
+
+The glyph is a display, not a coffee cup: this app holds a display assertion, and the cup was
+inherited from the caffeine tools — it said "keep the computer awake" and disagreed with the
+app icon, which is the same monitor with a sun in it. `holding` and `armed` are that one glyph
+at two opacities, which is also how the state reads: a bright screen that is being held awake,
+and a dim one that may sleep.
 
 `holding` is not self-reported: after acquiring, the daemon re-reads
 `IOPMCopyAssertionsByProcess()` and checks that *its own* assertion is really there
@@ -170,9 +176,18 @@ none — and a version number is nearly all an About box would have to say. The 
 beside it because that is the other half of any report about the filters, which track IOKit
 internals that move between macOS releases.
 
-The glyph is a template image, so it follows the menu bar appearance; the two idle states are
-dimmed with `appearsDisabled` rather than a hardcoded colour, which is what keeps the icon
-legible over both a light and a dark menu bar.
+As every menu bar item is, it is a template image, so it follows the bar's appearance; the two
+idle states are dimmed with `appearsDisabled` rather than a hardcoded colour, which is what
+keeps the icon legible over both a light and a dark menu bar.
+
+All four glyphs are drawn into a canvas as wide as the widest of them (19pt, the display's
+width), because a variable-length status item takes its width from its image and the symbols
+are not all the same width: `pause.circle` is 15pt and the warning triangle 17pt, so before
+this the item — and every menu bar item to its left — shifted 4 points whenever you paused.
+The ink is centred inside the symbol's own bounds already, so padding it costs nothing
+visually and the item keeps one width in every state. The picture above is rendered by
+`scripts/menubar-sheet.swift` rather than screenshotted, so it is regenerated when a glyph
+changes.
 
 The **app icon** is the same idea in colour: a display on an indigo plate with a sun in it,
 because keeping the display awake is the whole job. It is drawn rather than checked in —

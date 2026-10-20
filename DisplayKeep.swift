@@ -754,8 +754,18 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: UI
 
-    private enum Visual: String {
+    private enum Visual: String, CaseIterable {
         case holding, armed, paused, failed
+
+        var symbol: String {
+            switch self {
+            // The display is the app: no caffeine metaphor, and the same monitor the app icon
+            // draws the sun into. `armed` is this glyph dimmed — a screen that may sleep.
+            case .holding, .armed: return "display"
+            case .paused: return "pause.circle"
+            case .failed: return "exclamationmark.triangle.fill"
+            }
+        }
     }
 
     private func visual() -> Visual {
@@ -784,17 +794,38 @@ final class Daemon: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func iconImage(_ v: Visual) -> NSImage? {
-        let name: String
-        switch v {
-        case .holding: name = "cup.and.saucer.fill"
-        case .armed: name = "cup.and.saucer"
-        case .paused: name = "pause.circle"
-        case .failed: name = "exclamationmark.triangle.fill"
+    /// The glyphs are different SF Symbols, and so different widths: 19pt for the display, 17
+    /// for the warning triangle, 15 for `pause.circle`. A variable-length status item takes its
+    /// width from its image, so left alone the item — and with it every menu bar item to its
+    /// left — shifted 4pt every time the state changed. Each glyph is drawn into a canvas as
+    /// wide as the widest of them; its ink is already centred inside the symbol's own bounds,
+    /// so the glyph stays put and the item keeps one width.
+    private lazy var statusGlyphs: [Visual: NSImage] = {
+        var symbols: [(Visual, NSImage)] = []
+        for v in Visual.allCases {
+            guard let img = NSImage(systemSymbolName: v.symbol,
+                                    accessibilityDescription: "displaykeep: \(v.rawValue)") else { continue }
+            img.isTemplate = true
+            symbols.append((v, img))
         }
-        let img = NSImage(systemSymbolName: name, accessibilityDescription: "displaykeep: \(v.rawValue)")
-        img?.isTemplate = true
-        return img
+        let width = symbols.map { $0.1.size.width }.max() ?? 0
+        var padded: [Visual: NSImage] = [:]
+        for (v, img) in symbols {
+            let size = NSSize(width: width, height: img.size.height)
+            let canvas = NSImage(size: size, flipped: false) { _ in
+                img.draw(in: NSRect(x: (size.width - img.size.width) / 2,
+                                    y: (size.height - img.size.height) / 2,
+                                    width: img.size.width, height: img.size.height))
+                return true
+            }
+            canvas.isTemplate = true
+            padded[v] = canvas
+        }
+        return padded
+    }()
+
+    private func iconImage(_ v: Visual) -> NSImage? {
+        statusGlyphs[v]
     }
 
     private func refreshUI() {
